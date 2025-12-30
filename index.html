@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SA News Live</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- PWA -->
+<link rel="manifest" href="data:application/manifest+json,{
+  &quot;name&quot;:&quot;SA News Live&quot;,
+  &quot;short_name&quot;:&quot;SA News&quot;,
+  &quot;start_url&quot;:&quot;.&quot;,
+  &quot;display&quot;:&quot;standalone&quot;,
+  &quot;background_color&quot;:&quot;#006400&quot;,
+  &quot;theme_color&quot;:&quot;#006400&quot;
+}">
+
+<style>
+:root{
+  --bg:#f4f4f4;--card:#fff;--text:#222;--accent:#006400;
+}
+body.dark{--bg:#121212;--card:#1e1e1e;--text:#f1f1f1;}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,Arial;background:var(--bg);color:var(--text)}
+header{background:var(--accent);color:#fff;padding:14px;text-align:center}
+header h1{margin:0;font-size:22px}
+.ticker{background:#000;color:#fff;white-space:nowrap;overflow:hidden}
+.ticker span{display:inline-block;padding:8px 16px;animation:scroll 25s linear infinite}
+@keyframes scroll{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
+.controls{display:flex;gap:8px;flex-wrap:wrap;padding:10px;background:#ddd}
+.controls button,.controls input{padding:8px;border:0;border-radius:6px;font-size:14px}
+.controls button{background:var(--accent);color:#fff}
+main{padding:10px}
+.news-card{background:var(--card);margin-bottom:12px;border-radius:8px;overflow:hidden;
+ box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.news-card img{width:100%;height:180px;object-fit:cover}
+.news-card .pad{padding:12px}
+.news-card h3{margin:0 0 6px;font-size:17px}
+.news-card p{font-size:14px}
+.news-card a{color:var(--accent);text-decoration:none;font-weight:700}
+footer{text-align:center;font-size:13px;padding:10px;background:#ccc}
+.badge{font-size:11px;background:#e53935;color:#fff;padding:2px 6px;border-radius:4px}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>🇿🇦 SA News Live</h1>
+  <p>Real-time • Mobile • Installable</p>
+</header>
+
+<div class="ticker"><span id="breaking">Loading breaking news…</span></div>
+
+<div class="controls">
+  <button onclick="loadNews('top')">Top</button>
+  <button onclick="loadNews('politics')">Politics</button>
+  <button onclick="loadNews('crime')">Crime</button>
+  <button onclick="loadNews('sports')">Sports</button>
+  <button onclick="toggleDark()">🌙</button>
+  <button onclick="manualRefresh()">↻</button>
+</div>
+
+<div class="controls">
+  <input id="search" placeholder="Search…" oninput="filterNews()">
+</div>
+
+<main id="news"><p>Loading…</p></main>
+
+<footer>© 2025 SA News Live</footer>
+
+<script>
+let allArticles=[], lastLoaded=Date.now();
+const feeds={
+  top:["https://www.news24.com/rss","https://www.iol.co.za/cmlink/1.640"],
+  politics:["https://www.timeslive.co.za/rss/?section=politics"],
+  crime:["https://www.timeslive.co.za/rss/?section=crime"],
+  sports:["https://www.sport24.co.za/rss"]
+};
+const proxy=u=>"https://api.allorigins.win/get?url="+encodeURIComponent(u);
+
+function fetchFeed(u){return fetch(proxy(u)).then(r=>r.json())}
+
+function loadNews(cat){
+  document.getElementById("news").innerHTML="Loading…";
+  allArticles=[];
+  Promise.all(feeds[cat].map(f=>fetchFeed(f).then(d=>{
+    const xml=new DOMParser().parseFromString(d.contents,"text/xml");
+    xml.querySelectorAll("item").forEach(it=>{
+      allArticles.push({
+        title:it.querySelector("title")?.textContent||"",
+        link:it.querySelector("link")?.textContent||"",
+        desc:(it.querySelector("description")?.textContent||"").replace(/<[^>]+>/g,""),
+        img:it.querySelector("enclosure")?.getAttribute("url")||""
+      });
+    });
+  }))).then(()=>{
+    lastLoaded=Date.now();
+    localStorage.setItem("cache",JSON.stringify({t:lastLoaded,a:allArticles}));
+    render(allArticles.slice(0,25));
+    setBreaking();
+  }).catch(loadFromCache);
+}
+
+function render(list){
+  const n=document.getElementById("news"); n.innerHTML="";
+  list.forEach((a,i)=>{
+    n.innerHTML+=`
+    <div class="news-card">
+      ${a.img?`<img src="${a.img}" alt="">`:""}
+      <div class="pad">
+        ${i<3?'<span class="badge">BREAKING</span>':''}
+        <h3>${a.title}</h3>
+        <p>${a.desc}</p>
+        <a href="${a.link}" target="_blank">Read more</a>
+      </div>
+    </div>`;
+  });
+}
+
+function filterNews(){
+  const q=search.value.toLowerCase();
+  render(allArticles.filter(a=>a.title.toLowerCase().includes(q)));
+}
+
+function toggleDark(){document.body.classList.toggle("dark")}
+
+function setBreaking(){
+  const top3=allArticles.slice(0,3).map(a=>a.title).join(" • ");
+  document.getElementById("breaking").textContent=top3||"Latest SA headlines";
+}
+
+function manualRefresh(){loadNews("top")}
+
+function loadFromCache(){
+  const c=JSON.parse(localStorage.getItem("cache")||"{}");
+  if(c.a){allArticles=c.a; render(allArticles.slice(0,25)); setBreaking();}
+  else document.getElementById("news").innerHTML="Offline. No cache yet.";
+}
+
+// Auto-refresh every 5 minutes
+setInterval(()=>{ if(Date.now()-lastLoaded>300000) loadNews("top"); },300000);
+
+// Initial load
+loadNews("top");
+
+// Simple service worker (offline shell)
+if('serviceWorker' in navigator){
+  const sw=`self.addEventListener('install',e=>self.skipWaiting());
+  self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})`;
+  const blob=new Blob([sw],{type:'text/javascript'});
+  navigator.serviceWorker.register(URL.createObjectURL(blob));
+}
+</script>
+
+</body>
+</html>
